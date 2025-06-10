@@ -2,3 +2,8 @@ streamlit
 fastapi
 langchain
 dotevn
+pydantic
+sqlalchemy
+requests
+pandas
+langchain_groq

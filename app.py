@@ -1,6 +1,7 @@
 import streamlit as st
 import requests
 from datetime import datetime
+import pandas as pd
 
 # FastAPI backend URL
 BASE_URL = "http://localhost:8000"
@@ -28,6 +29,23 @@ def make_api_request(method, endpoint, data=None, params=None):
     except requests.exceptions.RequestException as e:
         st.error(f"Error: {e}")
         return None
+
+# Helper function to format meal plan as a table
+def format_meal_plan_for_table(meal_plan):
+    days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+    table_data = []
+    for day in days:
+        meals = meal_plan.get(day, [])
+        breakfast = meals[0][0] if len(meals) > 0 and len(meals[0]) > 0 else "No meal"
+        lunch = meals[1][0] if len(meals) > 1 and len(meals[1]) > 0 else "No meal"
+        dinner = meals[2][0] if len(meals) > 2 and len(meals[2]) > 0 else "No meal"
+        table_data.append({
+            "Day": day.capitalize(),
+            "Breakfast": breakfast,
+            "Lunch": lunch,
+            "Dinner": dinner
+        })
+    return table_data
 
 # Parent-specific functionality
 if role == "Parent":
@@ -65,9 +83,9 @@ if role == "Parent":
             result = make_api_request("POST", "/Child_activity", data=data, params={"role": "Parent"})
             if result:
                 st.success(result.get("message", "Activity added"))
+
     st.header("Delete Activity")
     with st.form("delete_activity"):
-        # Fetch activities directly from the backend (use /driver_schedule as a fallback to get activities)
         result = make_api_request("GET", "/driver_schedule", params={"role": "Parent"})
         activity_names = [entry["activity"] for entry in result.get("schedule", [])] if result else []
         if activity_names:
@@ -115,16 +133,13 @@ if role in ["Parent", "Driver"]:
 if role == "Cook":
     st.header("Meal Plan")
     if st.button("View Meal Plan"):
-        result = make_api_request("GET", "/state", params={"role": "Cook"})
+        result = make_api_request("GET", "/meal_plan", params={"role": "Cook"})
         if result:
             meal_plan = result.get("meal_plan", {})
             if meal_plan:
                 st.write("Meal Plan:")
-                for day, meals in meal_plan.items():
-                    st.write(f"{day.capitalize()}:")
-                    for i, meal in enumerate(meals):
-                        meal_type = ["Breakfast", "Lunch", "Dinner"][i] if i < 3 else f"Meal {i+1}"
-                        st.write(f"  - {meal_type}: {meal[0]}")
+                table_data = format_meal_plan_for_table(meal_plan)
+                st.table(table_data)
             else:
                 st.warning("No meal plan available")
 
@@ -138,4 +153,10 @@ if role == "Parent":
             result = make_api_request("POST", "/meal_plan", data={"preferences": preferences}, params={"role": "Parent"})
             if result:
                 st.success(result.get("message", "Meal plan generated"))
-                st.write("Generated Meal Plan:", result.get("meal_plan", {}))
+                meal_plan = result.get("meal_plan", {})
+                if meal_plan:
+                    st.write("Generated Meal Plan:")
+                    table_data = format_meal_plan_for_table(meal_plan)
+                    st.table(table_data)
+                else:
+                    st.warning("No meal plan generated")
