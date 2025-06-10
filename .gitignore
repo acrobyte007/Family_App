@@ -1,0 +1,11 @@
+venv
+\venv
+\Include
+\venv\Include\pyconfig.h
+\venv\Include\pyconfig.h.orig
+\venv\Include\pydtrace.h
+\venv\Include\pydtrace.h.orig
+\venv\Include\pyerrors.h
+env
+\env
+.env
