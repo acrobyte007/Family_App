@@ -1,4 +1,5 @@
-from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime
+
+from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import json
@@ -25,6 +26,8 @@ class Activity(Base):
     location = Column(String, nullable=False)
     caregiver = Column(String, nullable=False)
     repetition = Column(String, nullable=False)
+    driver_required = Column(Boolean, default=False)  # Add driver_required field
+    date = Column(String, nullable=False)  # Add date field
     timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 class MealPlan(Base):
@@ -65,7 +68,9 @@ def load_latest_data():
                 "days": json.loads(a.days),
                 "location": a.location,
                 "caregiver": a.caregiver,
-                "repetition": a.repetition
+                "repetition": a.repetition,
+                "driver_required": a.driver_required,  # Include driver_required
+                "date": a.date  # Include date
             } for a in activities
         ] if activities else []
 
@@ -145,7 +150,9 @@ def save_activity(activity):
             days=json.dumps(activity["days"]),
             location=activity["location"],
             caregiver=activity["caregiver"],
-            repetition=activity["repetition"]
+            repetition=activity["repetition"],
+            driver_required=activity.get("driver_required", False),  # Save driver_required
+            date=activity["date"]  # Save date
         )
         session.add(db_activity)
         session.commit()
@@ -204,3 +211,8 @@ def save_schedule(schedule):
         session.commit()
     finally:
         session.close()
+
+
+# Drop and recreate tables to apply schema changes
+Base.metadata.drop_all(engine)
+Base.metadata.create_all(engine)

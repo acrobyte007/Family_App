@@ -10,3 +10,10 @@ env
 \env
 .env
 family_planner.db
+__pycache__
+\__pycache__
+\__pycache__\*.cpython-39.pyc
+\__pycache__\*.cpython-310.pyc
+\__pycache__\*.cpython-311.pyc
+\__pycache__\*.cpython-312.pyc
+\__pycache__\*.cpython-313.pyc
