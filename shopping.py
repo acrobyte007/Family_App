@@ -70,11 +70,8 @@ def shopping_list_generator(meal_plan: Dict[str, List[List[str]]]) -> Dict[str, 
     except Exception as e:
         # Fallback: Return uncategorized list if LLM fails
         return {
-            "Produce": [],
-            "Dairy": [],
-            "Pantry": [],
-            "Bakery": [],
-            "Other": unique_ingredients
+
+            "Ingredients": unique_ingredients
         }
 
 if __name__ == "__main__":
