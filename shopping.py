@@ -38,9 +38,7 @@ def shopping_list_generator(meal_plan: Dict[str, List[List[str]]]) -> Dict[str, 
 
     # Create prompt for LLM to categorize ingredients
     prompt_template = ChatPromptTemplate.from_template("""
-        You are a meal planning assistant. Given a list of ingredients, categorize them into grocery store sections: 
-        Produce, Dairy, Pantry, Bakery, and Other. Return a JSON object with these sections as keys and lists of 
-        ingredients as values. If an ingredient doesn't clearly fit a section, place it in 'Other'. Use the provided 
+        You are a meal planning assistant. Given a list of ingredients,only ingredients not the whole food itself
         ingredient names exactly as given.
 
         Ingredients: {ingredients}

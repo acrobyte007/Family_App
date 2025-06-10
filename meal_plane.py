@@ -108,7 +108,7 @@ import json
 def main():
     try:
         # Example usage
-        query = "Plan a week of Italian vegetarian spicy meals"
+        query = "Plan a week of indian non vegetarian spicy meals"
         tool_calls = weekly_meal_planner(query)
         print("Tool Calls:", json.dumps(tool_calls, indent=2))
     except Exception as e:

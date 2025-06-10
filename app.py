@@ -1,283 +1,275 @@
 import streamlit as st
-import os
-from dotenv import load_dotenv
-from typing import Dict, List, Optional
+from typing import Dict, List
+import pandas as pd
 from meal_plane import weekly_meal_planner
 from shopping import shopping_list_generator
-from activity import child_activity_planner
+from db import (
+    load_latest_data, get_timestamps, load_data_by_timestamp,
+    save_family_member, save_activity, update_activity, delete_activity,
+    save_meal_plan, save_shopping_list, save_schedule,
+    FamilyMember, Activity, MealPlan, ShoppingList, Schedule
+)
 
-# Load environment variables
-load_dotenv()
-
-# Streamlit app configuration
-st.set_page_config(page_title="Family Planner", layout="wide")
-
-# Main app
-def main():
-    st.title("Family Planner App")
-
-    # Role selection
-    role = st.sidebar.selectbox("Select Role", ["Parent", "Cook", "Driver"])
-
-    # Initialize session state
-    if "activities" not in st.session_state:
-        st.session_state["activities"] = []
-    if "weekly_meals" not in st.session_state:
-        st.session_state["weekly_meals"] = {}
-    if "shopping_list" not in st.session_state:
-        st.session_state["shopping_list"] = {}
-    if "activity_schedule" not in st.session_state:
-        st.session_state["activity_schedule"] = {"reminders": []}
+def initialize_session_state():
+    """Initialize session state variables."""
+    if "role" not in st.session_state:
+        st.session_state.role = None
     if "family_members" not in st.session_state:
-        st.session_state["family_members"] = []
+        st.session_state.family_members = []
+    if "activities" not in st.session_state:
+        st.session_state.activities = []
+    if "meal_plan" not in st.session_state:
+        st.session_state.meal_plan = {}
+    if "shopping_list" not in st.session_state:
+        st.session_state.shopping_list = {}
+    if "schedule" not in st.session_state:
+        st.session_state.schedule = []
 
-    # Clear meal plan and shopping list for Driver role
-    if role == "Driver":
-        st.session_state["weekly_meals"] = {}
-        st.session_state["shopping_list"] = {}
+def load_session_state():
+    """Load latest data into session state."""
+    data = load_latest_data()
+    st.session_state.family_members = data["family_members"]
+    st.session_state.activities = data["activities"]
+    st.session_state.meal_plan = data["meal_plan"]
+    st.session_state.shopping_list = data["shopping_list"]
+    st.session_state.schedule = data["schedule"]
 
-    # Register new family member (Parent only)
-    if role == "Parent":
-        st.subheader("Register Family Member")
-        with st.form("member_form"):
-            member_name = st.text_input("Member Name")
-            submit_member = st.form_submit_button("Add Member")
-            if submit_member and member_name:
-                if member_name not in st.session_state["family_members"] and member_name.lower() != "driver":
-                    st.session_state["family_members"].append(member_name)
-                    st.success(f"Added {member_name} to family members!")
-                else:
-                    st.error("Member already exists or invalid (cannot use 'Driver').")
+def generate_schedule(activities: List[Dict]) -> List[Dict]:
+    """Generate a reminder schedule from activities."""
+    schedule = []
+    for activity in activities:
+        days = activity.get("days", [])
+        for day in days:
+            schedule.append({
+                "day": day,
+                "activity": activity["name"],
+                "time": activity["time"],
+                "location": activity["location"],
+                "caregiver": activity["caregiver"]
+            })
+    return sorted(schedule, key=lambda x: (x["day"], x["time"]))
 
-        # Display current family members
-        if st.session_state["family_members"]:
-            st.write("**Registered Family Members**")
-            for member in st.session_state["family_members"]:
-                st.write(f"- {member}")
-
-    # Activity management (Parent only)
-    if role == "Parent":
-        st.subheader("Manage Activities")
-        with st.form("activity_form"):
-            activity_name = st.text_input("Activity Name")
-            activity_time = st.text_input("Time (e.g., 15:00)")
-            activity_days = st.multiselect("Days", ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"])
-            activity_location = st.text_input("Location")
-            activity_repetition = st.selectbox("Repetition", ["weekly", "monthly", "one-time"])
-            caregiver_options = ["Driver"] + st.session_state["family_members"]
-            activity_caregiver = st.selectbox("Caregiver", caregiver_options)
-            submit_activity = st.form_submit_button("Add Activity")
-
-            if submit_activity and activity_name and activity_time and activity_days and activity_location and activity_caregiver:
-                new_activity = {
-                    "name": activity_name,
-                    "time": activity_time,
-                    "days": activity_days,
-                    "location": activity_location,
-                    "repetition": activity_repetition,
-                    "caregiver": activity_caregiver.strip()
-                }
-                st.session_state["activities"].append(new_activity)
-                st.success(f"Added {activity_name} to activities!")
-                try:
-                    st.session_state["activity_schedule"] = child_activity_planner(st.session_state["activities"], current_date="2025-06-09")
-                except Exception as e:
-                    st.warning(f"Failed to update activity schedule: {str(e)}")
-
-        st.subheader("Current Activities")
-        if st.session_state["activities"]:
-            for i, activity in enumerate(st.session_state["activities"]):
-                st.write(f"{activity['name']} at {activity['time']} on {', '.join(activity['days'])} ({activity['location']}, {activity['repetition']}, Caregiver: {activity['caregiver']})")
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.button(f"Edit {activity['name']}", key=f"edit_{i}"):
-                        st.session_state["edit_index"] = i
-                        st.session_state["edit_mode"] = True
-                with col2:
-                    if st.button(f"Delete {activity['name']}", key=f"delete_{i}"):
-                        st.session_state["activities"].pop(i)
-                        st.success(f"Deleted {activity['name']}")
-                        try:
-                            st.session_state["activity_schedule"] = child_activity_planner(st.session_state["activities"], current_date="2025-06-09")
-                        except Exception as e:
-                            st.warning(f"Failed to update activity schedule: {str(e)}")
-                        st.rerun()
-
-            if "edit_mode" in st.session_state and st.session_state["edit_mode"]:
-                edit_index = st.session_state["edit_index"]
-                activity = st.session_state["activities"][edit_index]
-                with st.form(f"edit_form_{edit_index}"):
-                    edit_name = st.text_input("Activity Name", value=activity["name"])
-                    edit_time = st.text_input("Time", value=activity["time"])
-                    edit_days = st.multiselect("Days", ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"], default=activity["days"])
-                    edit_location = st.text_input("Location", value=activity["location"])
-                    edit_repetition = st.selectbox("Repetition", ["weekly", "monthly", "one-time"], index=["weekly", "monthly", "one-time"].index(activity["repetition"]))
-                    edit_caregiver = st.selectbox("Caregiver", caregiver_options, index=caregiver_options.index(activity["caregiver"]))
-                    submit_edit = st.form_submit_button("Save Changes")
-
-                    if submit_edit:
-                        st.session_state["activities"][edit_index] = {
-                            "name": edit_name,
-                            "time": edit_time,
-                            "days": edit_days,
-                            "location": edit_location,
-                            "repetition": edit_repetition,
-                            "caregiver": edit_caregiver.strip()
-                        }
-                        st.session_state["edit_mode"] = False
-                        st.success(f"Updated {edit_name}")
-                        try:
-                            st.session_state["activity_schedule"] = child_activity_planner(st.session_state["activities"], current_date="2025-06-09")
-                        except Exception as e:
-                            st.warning(f"Failed to update activity schedule: {str(e)}")
-                        st.rerun()
-        else:
-            st.info("No activities added yet. Use the form above to add activities.")
-
-    # Meal planning (Parent only)
-    if role == "Parent":
-        st.subheader("Meal Planning")
-        with st.form("meal_form"):
-            query = st.text_input("Meal Plan Query (e.g., 'Plan a week of Italian vegetarian spicy meals')", "Plan a week of Italian vegetarian spicy meals")
-            submit_meal = st.form_submit_button("Generate Plan")
-
-            if submit_meal:
-                try:
-                    tool_calls = weekly_meal_planner(query)
-                    st.write("**Debug: Raw Tool Calls Response**")
-                    st.write(tool_calls)
-                    meal_plan = None
-                    # Handle both flat and nested tool call structures
-                    if isinstance(tool_calls, list):
-                        for call in tool_calls:
-                            if isinstance(call, dict):
-                                # Handle nested tool_calls
-                                if call.get("tool_calls"):
-                                    for sub_call in call.get("tool_calls", []):
-                                        if sub_call.get("function", {}).get("name") == "WeeklyMealPlan":
-                                            meal_plan = sub_call["parameters"]
-                                            break
-                                # Handle direct WeeklyMealPlan call
-                                elif call.get("function", {}).get("name") == "WeeklyMealPlan":
-                                    meal_plan = call["parameters"]
-                            if meal_plan:
-                                break
-                    if not meal_plan:
-                        raise ValueError("No valid WeeklyMealPlan found in response")
-                    
-                    st.session_state["weekly_meals"] = meal_plan
-                    try:
-                        shopping_list = shopping_list_generator(meal_plan)
-                        st.session_state["shopping_list"] = shopping_list
-                    except Exception as e:
-                        st.warning(f"Failed to generate shopping list: {str(e)}")
-                        st.session_state["shopping_list"] = {}
-                except Exception as e:
-                    st.error(f"Failed to generate meal plan. Ensure the query specifies vegetarian meals and check your API key. Error: {str(e)}")
-                    st.session_state["weekly_meals"] = {}
-                    st.session_state["shopping_list"] = {}
-
-    # Meal plan and shopping list display (Parent, Cook)
-    if role in ["Parent", "Cook"]:
-        if st.session_state["weekly_meals"]:
-            st.subheader("Weekly Meal Plan")
-            display_meal_plan(st.session_state["weekly_meals"])
-        else:
-            st.info("No meal plan available. Parent can generate a meal plan.")
-        
-        if st.session_state["shopping_list"]:
-            st.subheader("Shopping List")
-            display_shopping_list(st.session_state["shopping_list"])
-        else:
-            st.info("No shopping list available. Generate a meal plan to create one.")
-
-    # Activity schedule (Parent, Driver)
-    if role in ["Parent", "Driver"]:
-        st.subheader("Activity Schedule")
-        if role == "Parent":
-            st.write("**Debug: Raw Activities**")
-            st.write(st.session_state["activities"])
-            st.write("**Debug: Raw Schedule Reminders**")
-            st.write(st.session_state["activity_schedule"]["reminders"])
-
-        if st.button("Refresh Activity Schedule"):
-            try:
-                st.session_state["activity_schedule"] = child_activity_planner(st.session_state["activities"], current_date="2025-06-09")
-                st.success("Activity schedule refreshed!")
-            except Exception as e:
-                st.warning(f"Failed to refresh activity schedule: {str(e)}")
-                st.session_state["activity_schedule"] = {"reminders": []}
-
-        if role == "Driver":
-            filtered_schedule = {
-                "reminders": [
-                    reminder for reminder in st.session_state["activity_schedule"]["reminders"]
-                    if reminder.get("caregiver", "").lower().strip() == "driver"
-                ]
-            }
-            st.write("**Debug: Filtered Reminders for Driver**")
-            st.write(filtered_schedule["reminders"])
-            display_activity_schedule(filtered_schedule)
-        else:
-            display_activity_schedule(st.session_state["activity_schedule"])
-
-def display_meal_plan(meal_plan: Dict[str, List[List[str]]]):
-    """Display the weekly meal plan in a table format."""
+def create_meal_plan_table(meal_plan: Dict) -> pd.DataFrame:
+    """Create a day-wise table for meals with Breakfast, Lunch, and Dinner columns."""
     days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
-    meal_types = ["Breakfast", "Lunch", "Dinner"]
+    meal_table = {"Day": [day.capitalize() for day in days], "Breakfast": [], "Lunch": [], "Dinner": []}
+    
+    for day in days:
+        meals = meal_plan.get(day, [])
+        breakfast = meals[0][0] if len(meals) > 0 and len(meals[0]) > 0 else "No meal planned"
+        lunch = meals[1][0] if len(meals) > 1 and len(meals[1]) > 0 else "No meal planned"
+        dinner = meals[2][0] if len(meals) > 2 and len(meals[2]) > 0 else "No meal planned"
+        meal_table["Breakfast"].append(breakfast)
+        meal_table["Lunch"].append(lunch)
+        meal_table["Dinner"].append(dinner)
+    
+    return pd.DataFrame(meal_table)
 
+def display_meal_plan_details(meal_plan: Dict):
+    """Display meal plan details with ingredients in an expander."""
+    days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
     for day in days:
         meals = meal_plan.get(day, [])
         if meals:
-            st.write(f"**{day.capitalize()}**")
-            table_data = []
-            for i, meal in enumerate(meals):
-                if i < len(meal_types):
-                    dish_name = meal[0].split(": ", 1)[1] if ": " in meal[0] else meal[0]
-                    ingredients = meal[1] if len(meal) > 1 else ""
-                    table_data.append({
-                        "Meal Type": meal_types[i],
-                        "Dish Name": dish_name,
-                        "Ingredients": ingredients
-                    })
-            st.table(table_data)
-            st.write("---")
-        else:
-            st.write(f"**{day.capitalize()}**: No meals planned")
+            with st.expander(f"{day.capitalize()} Meal Details"):
+                for i, meal in enumerate(meals):
+                    meal_type = ["Breakfast", "Lunch", "Dinner"][i] if i < 3 else f"Meal {i+1}"
+                    st.write(f"**{meal_type}**: {meal[0]}")
+                    st.write(f"Ingredients: {meal[1] if len(meal) > 1 else 'None'}")
 
-def display_shopping_list(shopping_list: Dict[str, List[str]]):
-    """Display the shopping list, excluding empty sections."""
-    for section, items in shopping_list.items():
-        if items:
-            st.write(f"**{section}**")
-            for item in items:
-                st.write(f"- {item}")
+def main():
+    st.title("Family Planner App")
+    initialize_session_state()
+    load_session_state()
 
-def display_activity_schedule(schedule: Dict):
-    """Display the child activity schedule in a table format."""
-    reminders = schedule.get("reminders", [])
-    if not reminders:
-        st.info("No activities scheduled.")
-        return
+    # Role selection
+    st.session_state.role = st.selectbox("Select your role", ["Parent", "Cook", "Driver"], key="role_select")
 
-    table_data = []
-    for reminder in reminders:
-        if isinstance(reminder, dict) and all(key in reminder for key in ["name", "time", "day", "location"]):
-            table_data.append({
-                "Activity Name": reminder["name"],
-                "Time": reminder["time"],
-                "Day": reminder["day"],
-                "Location": reminder["location"],
-                "Repetition": reminder.get("repetition", ""),
-                "Caregiver": reminder.get("caregiver", "")
-            })
-        else:
-            st.warning(f"Invalid reminder format: {reminder}")
+    if st.session_state.role == "Parent":
+        # Family members management
+        st.subheader("Register Family Members")
+        # Dropdown to view previous family members
+        family_timestamps = get_timestamps(FamilyMember)
+        if family_timestamps:
+            selected_family_ts = st.selectbox("View Previous Family Members", ["Latest"] + family_timestamps, key="family_ts")
+            if selected_family_ts != "Latest":
+                st.session_state.family_members = load_data_by_timestamp(FamilyMember, selected_family_ts, "family_members") or []
 
-    if table_data:
-        st.table(table_data)
-    else:
-        st.info("No valid activities found in schedule.")
+        with st.form("family_form"):
+            member_name = st.text_input("Family Member Name")
+            submit_member = st.form_submit_button("Add Member")
+            if submit_member and member_name:
+                save_family_member(member_name)
+                st.session_state.family_members.append(member_name)
+                st.success(f"Added {member_name} to family members")
+
+        if st.session_state.family_members:
+            st.write("Family Members:")
+            st.write(st.session_state.family_members)
+
+        # Activity management
+        st.subheader("Manage Activities")
+        # Dropdown to view previous activities
+        activity_timestamps = get_timestamps(Activity)
+        if activity_timestamps:
+            selected_activity_ts = st.selectbox("View Previous Activities", ["Latest"] + activity_timestamps, key="activity_ts")
+            if selected_activity_ts != "Latest":
+                st.session_state.activities = load_data_by_timestamp(Activity, selected_activity_ts, "activities") or []
+                st.session_state.schedule = generate_schedule(st.session_state.activities)
+
+        with st.form("activity_form"):
+            activity_name = st.text_input("Activity Name")
+            activity_time = st.time_input("Time")
+            activity_days = st.multiselect("Days", ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"])
+            location = st.text_input("Location")
+            caregiver = st.selectbox("Caregiver", st.session_state.family_members + ["Driver"])
+            repetition = st.selectbox("Repetition", ["Weekly", "One-time"])
+            submit_activity = st.form_submit_button("Add Activity")
+            if submit_activity and activity_name and activity_time and activity_days:
+                new_activity = {
+                    "name": activity_name,
+                    "time": activity_time.strftime("%H:%M"),
+                    "days": activity_days,
+                    "location": location,
+                    "caregiver": caregiver,
+                    "repetition": repetition
+                }
+                st.session_state.activities.append(new_activity)
+                save_activity(new_activity)
+                st.session_state.schedule = generate_schedule(st.session_state.activities)
+                save_schedule(st.session_state.schedule)
+                st.success("Activity added")
+
+        # Edit/Delete activities
+        if st.session_state.activities:
+            st.subheader("Current Activities")
+            activity_df = pd.DataFrame(st.session_state.activities)
+            st.table(activity_df)
+            with st.form("edit_delete_form"):
+                activity_to_edit = st.selectbox("Select Activity to Edit/Delete", [a["name"] for a in st.session_state.activities])
+                new_name = st.text_input("New Activity Name", value=activity_to_edit)
+                new_time = st.time_input("New Time", value=pd.to_datetime(st.session_state.activities[[a["name"] for a in st.session_state.activities].index(activity_to_edit)]["time"]).time())
+                new_days = st.multiselect("New Days", ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"], default=st.session_state.activities[[a["name"] for a in st.session_state.activities].index(activity_to_edit)]["days"])
+                new_location = st.text_input("New Location", value=st.session_state.activities[[a["name"] for a in st.session_state.activities].index(activity_to_edit)]["location"])
+                new_caregiver = st.selectbox("New Caregiver", st.session_state.family_members + ["Driver"], index=(st.session_state.family_members + ["Driver"]).index(st.session_state.activities[[a["name"] for a in st.session_state.activities].index(activity_to_edit)]["caregiver"]))
+                new_repetition = st.selectbox("New Repetition", ["Weekly", "One-time"], index=["Weekly", "One-time"].index(st.session_state.activities[[a["name"] for a in st.session_state.activities].index(activity_to_edit)]["repetition"]))
+                col1, col2 = st.columns(2)
+                with col1:
+                    edit_activity = st.form_submit_button("Edit Activity")
+                with col2:
+                    delete_activity = st.form_submit_button("Delete Activity")
+                
+                if edit_activity:
+                    idx = [a["name"] for a in st.session_state.activities].index(activity_to_edit)
+                    new_activity = {
+                        "name": new_name,
+                        "time": new_time.strftime("%H:%M"),
+                        "days": new_days,
+                        "location": new_location,
+                        "caregiver": new_caregiver,
+                        "repetition": new_repetition
+                    }
+                    st.session_state.activities[idx] = new_activity
+                    update_activity(activity_to_edit, new_activity)
+                    st.session_state.schedule = generate_schedule(st.session_state.activities)
+                    save_schedule(st.session_state.schedule)
+                    st.success("Activity updated")
+                
+                if delete_activity:
+                    delete_activity(activity_to_edit)
+                    st.session_state.activities = [a for a in st.session_state.activities if a["name"] != activity_to_edit]
+                    st.session_state.schedule = generate_schedule(st.session_state.activities)
+                    save_schedule(st.session_state.schedule)
+                    st.success("Activity deleted")
+
+        # Meal planning
+        st.subheader("Generate Meal Plan")
+        # Dropdown to view previous meal plans
+        meal_plan_timestamps = get_timestamps(MealPlan)
+        if meal_plan_timestamps:
+            selected_meal_plan_ts = st.selectbox("View Previous Meal Plans", ["Latest"] + meal_plan_timestamps, key="meal_plan_ts")
+            if selected_meal_plan_ts != "Latest":
+                st.session_state.meal_plan = load_data_by_timestamp(MealPlan, selected_meal_plan_ts, "meal_plan") or {}
+                st.session_state.shopping_list = shopping_list_generator(st.session_state.meal_plan)
+                save_shopping_list(st.session_state.shopping_list)
+
+        with st.form("meal_plan_form"):
+            meal_prompt = st.text_area("Enter meal preferences (e.g., Italian vegetarian spicy meals)")
+            submit_meal = st.form_submit_button("Generate Meal Plan")
+            if submit_meal and meal_prompt:
+                tool_calls = weekly_meal_planner(meal_prompt)
+                st.session_state.meal_plan = tool_calls[0]["args"]
+                st.session_state.shopping_list = shopping_list_generator(st.session_state.meal_plan)
+                save_meal_plan(st.session_state.meal_plan)
+                save_shopping_list(st.session_state.shopping_list)
+                st.success("Meal plan generated")
+
+        # Display meal plan as a day-wise table
+        if st.session_state.meal_plan:
+            st.subheader("Weekly Meal Plan")
+            meal_table = create_meal_plan_table(st.session_state.meal_plan)
+            st.table(meal_table)
+            st.write("View Meal Details and Ingredients")
+            display_meal_plan_details(st.session_state.meal_plan)
+        
+        # Display shopping list as a horizontal list
+        if st.session_state.shopping_list:
+            st.subheader("Shopping List")
+            # Dropdown to view previous shopping lists
+            shopping_list_timestamps = get_timestamps(ShoppingList)
+            if shopping_list_timestamps:
+                selected_shopping_list_ts = st.selectbox("View Previous Shopping Lists", ["Latest"] + shopping_list_timestamps, key="shopping_list_ts")
+                if selected_shopping_list_ts != "Latest":
+                    st.session_state.shopping_list = load_data_by_timestamp(ShoppingList, selected_shopping_list_ts, "shopping_list") or {}
+            items = [item for section, items_list in st.session_state.shopping_list.items() for item in items_list]
+            st.write(", ".join(items))
+
+    elif st.session_state.role == "Cook":
+        # Display meal plan as a day-wise table
+        if st.session_state.meal_plan:
+            st.subheader("Weekly Meal Plan")
+            # Dropdown to view previous meal plans
+            meal_plan_timestamps = get_timestamps(MealPlan)
+            if meal_plan_timestamps:
+                selected_meal_plan_ts = st.selectbox("View Previous Meal Plans", ["Latest"] + meal_plan_timestamps, key="meal_plan_ts_cook")
+                if selected_meal_plan_ts != "Latest":
+                    st.session_state.meal_plan = load_data_by_timestamp(MealPlan, selected_meal_plan_ts, "meal_plan") or {}
+            meal_table = create_meal_plan_table(st.session_state.meal_plan)
+            st.table(meal_table)
+            st.write("View Meal Details and Ingredients")
+            display_meal_plan_details(st.session_state.meal_plan)
+        
+        # Display shopping list as a horizontal list
+        if st.session_state.shopping_list:
+            st.subheader("Shopping List")
+            # Dropdown to view previous shopping lists
+            shopping_list_timestamps = get_timestamps(ShoppingList)
+            if shopping_list_timestamps:
+                selected_shopping_list_ts = st.selectbox("View Previous Shopping Lists", ["Latest"] + shopping_list_timestamps, key="shopping_list_ts_cook")
+                if selected_shopping_list_ts != "Latest":
+                    st.session_state.shopping_list = load_data_by_timestamp(ShoppingList, selected_shopping_list_ts, "shopping_list") or {}
+            items = [item for section, items_list in st.session_state.shopping_list.items() for item in items_list]
+            st.write(", ".join(items))
+
+    elif st.session_state.role == "Driver":
+        # Clear meal plan and shopping list
+        st.session_state.meal_plan = {}
+        st.session_state.shopping_list = {}
+        # Display filtered schedule for Driver
+        if st.session_state.schedule:
+            st.subheader("Driver Schedule")
+            # Dropdown to view previous schedules
+            schedule_timestamps = get_timestamps(Schedule)
+            if schedule_timestamps:
+                selected_schedule_ts = st.selectbox("View Previous Schedules", ["Latest"] + schedule_timestamps, key="schedule_ts")
+                if selected_schedule_ts != "Latest":
+                    st.session_state.schedule = load_data_by_timestamp(Schedule, selected_schedule_ts, "schedule") or []
+            driver_schedule = [s for s in st.session_state.schedule if s["caregiver"] == "Driver"]
+            if driver_schedule:
+                schedule_df = pd.DataFrame(driver_schedule)
+                st.table(schedule_df)
+            else:
+                st.write("No activities assigned to Driver")
 
 if __name__ == "__main__":
     main()
